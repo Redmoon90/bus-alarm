@@ -267,14 +267,13 @@
     let bgWatcherId = null;
 
     // ── 타임아웃 fetch (무한 대기 방지) ──
-    async function fetchTimeout(url, ms = 12000) {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), ms);
-      try {
-        return await fetch(url, { signal: ctrl.signal });
-      } finally {
-        clearTimeout(t);
-      }
+    // Promise.race 방식: 내부 fetch가 영영 안 끝나도 ms 후 반드시 에러로 끝남.
+    // CapacitorHttp 호환을 위해 signal/AbortController는 사용하지 않음.
+    function fetchTimeout(url, ms = 12000) {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('시간초과(' + (ms/1000) + '초)')), ms)
+      );
+      return Promise.race([ fetch(url), timeout ]);
     }
 
     // ── 상태 ──

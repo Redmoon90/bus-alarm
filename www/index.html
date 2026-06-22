@@ -171,7 +171,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v5</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v7</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -282,6 +282,7 @@
     const BackgroundGeolocation = IS_NATIVE ? getPlugin('BackgroundGeolocation') : null;
     const LocalNotifications    = IS_NATIVE ? getPlugin('LocalNotifications')    : null;
     const CapHttp               = IS_NATIVE ? getPlugin('CapacitorHttp')         : null;
+    const FullScreenAlarm       = IS_NATIVE ? getPlugin('FullScreenAlarm')       : null;
 
     try {
       const keys = (window.Capacitor && window.Capacitor.Plugins) ? Object.keys(window.Capacitor.Plugins).join(',') : '(없음)';
@@ -295,6 +296,8 @@
 
     // ── 상수 ──
     const ALERT_RADIUS = 200; // 미터
+    const ALARM_STAGES = [200, 100, 50, 10]; // 이 거리들에 진입할 때마다 알람
+    let firedStages = new Set();             // 이미 알람 울린 단계
 
     // 네이티브 백그라운드 위치 watcher id
     let bgWatcherId = null;
@@ -484,6 +487,8 @@
 
       // 동시 실행 (각각 독립 — 하나가 실패해도 전체는 진행)
       await Promise.allSettled([busSearch(), placeSearch()]);
+      // 정류장(🚏)을 항상 위로, 장소(📍)는 아래로 정렬
+      allResults.sort((a, b) => (a.type === 'stop' ? 0 : 1) - (b.type === 'stop' ? 0 : 1));
       dbg('■ 검색 완료: 결과 ' + allResults.length + '건, 오류 ' + errors.length + '건' + (errors.length ? ' → ' + errors.join(' | ') : ''));
 
       if (!allResults.length) {
@@ -720,6 +725,7 @@
     async function startTracking() {
       if (!destination) return;
       alarmFired = false;
+      firedStages = new Set();
 
       document.getElementById('start-btn').style.display = 'none';
       document.getElementById('stop-btn').style.display = 'block';
@@ -796,19 +802,24 @@
       // 노선도 현재 위치 갱신
       updateRoutePosition(latitude, longitude);
 
+      // 상태 표시
       if (dist <= ALERT_RADIUS) {
-        setStatus('arrived', '도착!', `${destination.name}까지 ${distText}`);
-        if (!alarmFired) {
-          fireAlarm();
-          alarmFired = true;
-        }
+        setStatus('arrived', distText, `${destination.name} 거의 도착!`);
       } else if (dist <= ALERT_RADIUS * 3) {
         setStatus('near', distText, `${destination.name} 근처입니다! 준비하세요`);
-        alarmFired = false;
       } else {
         setStatus('tracking', distText, `${destination.name}까지 남은 거리`);
-        alarmFired = false;
       }
+
+      // 단계별 알람: 200m → 100m → 50m → 10m 각 지점 진입 시마다 알람
+      for (const stage of ALARM_STAGES) {
+        if (dist <= stage && !firedStages.has(stage)) {
+          firedStages.add(stage);
+          fireAlarm(stage, dist);
+        }
+      }
+      // 목적지에서 충분히 멀어지면 다시 무장(재탑승/오작동 대비)
+      if (dist > ALERT_RADIUS + 80) firedStages.clear();
     }
 
     function onPositionError(err) {
@@ -829,44 +840,54 @@
     }
 
     // ── 알람 (소리 + 진동 + 알림) ──
-    function fireAlarm() {
-      const title = '🚌 하차 알림!';
-      const body = `${destination.name} 200m 이내 도착!`;
+    // stage: 200/100/50/10 (m), dist: 현재 실제 거리(m)
+    function fireAlarm(stage, dist) {
+      const remain = (dist != null) ? Math.round(dist) : stage;
+      const title = stage <= 10 ? '🚨 곧 도착! 내릴 준비!' : `🚌 하차 ${stage}m 전`;
+      const body = `${destination.name} — ${remain}m 남음`;
+      dbg('🔔 알람 발동: ' + stage + 'm (실제 ' + remain + 'm)');
+
+      // 진동 (가능하면 — 포그라운드에서 즉시)
+      try { if (navigator.vibrate) navigator.vibrate([600, 250, 600, 250, 600]); } catch(e) {}
+
+      // 네이티브: 전체화면 알람 (화면 꺼짐/잠금 시 화면 가득)
+      if (IS_NATIVE && FullScreenAlarm) {
+        try { FullScreenAlarm.trigger({ title, body }); } catch(e) { dbg('전체화면 알람 실패: ' + (e.message||e)); }
+      }
 
       if (IS_NATIVE && LocalNotifications) {
-        // 네이티브: 화면 꺼져 있어도 소리+진동+헤드업 알림
+        // 네이티브: 화면 꺼짐/다른 앱 사용 중에도 소리+진동+헤드업 알림(백업)
         try {
           LocalNotifications.schedule({
             notifications: [{
-              id: Date.now() % 100000,
+              id: 10000 + stage,                 // 단계별 고유 id (서로 덮어쓰지 않음)
               title,
               body,
               sound: 'default',
               channelId: 'bus-alarm',
-              ongoing: false
+              ongoing: false,
+              autoCancel: true,
+              schedule: { at: new Date(Date.now() + 100) }
             }]
           });
-        } catch(e) {}
-        return;
+        } catch(e) { dbg('알림 예약 실패: ' + (e.message||e)); }
       }
 
-      // 시스템 알림 (웹)
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'notify', title, body });
-      } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification(title, { body, icon: 'icon-192.png' });
+      // 웹(브라우저) 알림 + 경고음
+      if (!IS_NATIVE) {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'notify', title, body });
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(title, { body, icon: 'icon-192.png' });
+        }
       }
 
-      // 진동 (모바일)
-      if (navigator.vibrate) {
-        navigator.vibrate([500, 200, 500, 200, 500, 200, 500]);
-      }
-
-      // 소리 - 강한 경고음 반복
+      // 소리 - 강한 경고음 (포그라운드에서만 동작)
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        for (let i = 0; i < 8; i++) {
-          const t = i * 0.4;
+        const beeps = stage <= 10 ? 12 : 6;     // 가까울수록 더 길게
+        for (let i = 0; i < beeps; i++) {
+          const t = i * 0.35;
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           osc.connect(gain);
@@ -874,9 +895,9 @@
           osc.type = 'square';
           osc.frequency.value = i % 2 === 0 ? 1200 : 900;
           gain.gain.setValueAtTime(1.0, ctx.currentTime + t);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.3);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.28);
           osc.start(ctx.currentTime + t);
-          osc.stop(ctx.currentTime + t + 0.3);
+          osc.stop(ctx.currentTime + t + 0.28);
         }
       } catch(e) {}
     }

@@ -3,6 +3,9 @@
   "appName": "버스 하차 알리미",
   "webDir": "www",
   "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
     "LocalNotifications": {
       "iconColor": "#3b82f6"
     }

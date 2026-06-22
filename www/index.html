@@ -171,7 +171,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v4</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v5</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -267,11 +267,26 @@
 
     // ── 네이티브 플러그인 브릿지 (Capacitor) ──
     const IS_NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-    const BackgroundGeolocation = IS_NATIVE ? window.Capacitor.registerPlugin('BackgroundGeolocation') : null;
-    const LocalNotifications    = IS_NATIVE ? window.Capacitor.registerPlugin('LocalNotifications')    : null;
-    const CapHttp = IS_NATIVE ? ((window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) || window.Capacitor.registerPlugin('CapacitorHttp')) : null;
 
-    dbg('환경: ' + (IS_NATIVE ? '네이티브앱' : '웹') + ' / CapacitorHttp=' + (!!CapHttp));
+    // 플러그인 안전 접근 (어떤 경우에도 throw 하지 않음)
+    function getPlugin(name) {
+      try {
+        const C = window.Capacitor;
+        if (!C) return null;
+        if (C.Plugins && C.Plugins[name]) return C.Plugins[name];
+        if (typeof C.registerPlugin === 'function') return C.registerPlugin(name);
+      } catch (e) {}
+      return null;
+    }
+
+    const BackgroundGeolocation = IS_NATIVE ? getPlugin('BackgroundGeolocation') : null;
+    const LocalNotifications    = IS_NATIVE ? getPlugin('LocalNotifications')    : null;
+    const CapHttp               = IS_NATIVE ? getPlugin('CapacitorHttp')         : null;
+
+    try {
+      const keys = (window.Capacitor && window.Capacitor.Plugins) ? Object.keys(window.Capacitor.Plugins).join(',') : '(없음)';
+      dbg('환경:' + (IS_NATIVE ? '네이티브' : '웹') + ' | registerPlugin=' + (window.Capacitor && typeof window.Capacitor.registerPlugin) + ' | CapHttp=' + (!!CapHttp) + ' | LocalNotif=' + (!!LocalNotifications) + ' | Plugins=[' + keys + ']');
+    } catch(e) {}
 
     // 웹 전용: Service Worker (네이티브에서는 사용 안 함)
     if (!IS_NATIVE && 'serviceWorker' in navigator) {
@@ -710,9 +725,9 @@
       document.getElementById('stop-btn').style.display = 'block';
       setStatus('tracking', '추적 중...', `${destination.name} 방향 이동 중`);
 
-      if (IS_NATIVE) {
+      if (IS_NATIVE && BackgroundGeolocation) {
         // ── 네이티브: 백그라운드 위치 추적 (화면 꺼져도 작동) ──
-        try { await LocalNotifications.requestPermissions(); } catch(e) {}
+        try { if (LocalNotifications) await LocalNotifications.requestPermissions(); } catch(e) {}
         try {
           bgWatcherId = await BackgroundGeolocation.addWatcher(
             {

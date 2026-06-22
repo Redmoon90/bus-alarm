@@ -266,6 +266,17 @@
     // 네이티브 백그라운드 위치 watcher id
     let bgWatcherId = null;
 
+    // ── 타임아웃 fetch (무한 대기 방지) ──
+    async function fetchTimeout(url, ms = 12000) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), ms);
+      try {
+        return await fetch(url, { signal: ctrl.signal });
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
     // ── 상태 ──
     let destination = null; // { lat, lng, name }
     let selectedStop = null; // { stationId, stationName, mobileNo, lat, lng }
@@ -375,7 +386,7 @@
         if (!API_KEY) return;
         try {
           const url = `${BUS_API_BASE}/busstationservice/v2/getBusStationListv2?serviceKey=${API_KEY}&format=json&keyword=${encodeURIComponent(q)}`;
-          const res = await fetch(url);
+          const res = await fetchTimeout(url);
           const text = await res.text();
           let data;
           try { data = JSON.parse(text); } catch(e) {
@@ -402,7 +413,7 @@
       // 2) 장소 검색 (Nominatim)
       const placeSearch = async () => {
         try {
-          const res = await fetch(
+          const res = await fetchTimeout(
             `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=kr&limit=5&accept-language=ko`
           );
           if (!res.ok) { errors.push('장소검색: HTTP ' + res.status); return; }
@@ -472,7 +483,7 @@
 
       try {
         const url = `${BUS_API_BASE}/busarrivalservice/v2/getBusArrivalListv2?serviceKey=${API_KEY}&format=json&stationId=${stationId}`;
-        const res = await fetch(url);
+        const res = await fetchTimeout(url);
         const text = await res.text();
         let data;
         try { data = JSON.parse(text); } catch(e) {
@@ -545,7 +556,7 @@
 
       try {
         const url = `${BUS_API_BASE}/busrouteservice/v2/getBusRouteStationListv2?serviceKey=${API_KEY}&format=json&routeId=${routeId}`;
-        const res = await fetch(url);
+        const res = await fetchTimeout(url);
         const text = await res.text();
 
         // 권한 미승인(Forbidden) 등 처리

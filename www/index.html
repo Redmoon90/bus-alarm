@@ -171,7 +171,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미</h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v3</span></h1>
 
   <!-- 목적지 설정 -->
   <div class="card">
@@ -254,6 +254,7 @@
     const IS_NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     const BackgroundGeolocation = IS_NATIVE ? window.Capacitor.registerPlugin('BackgroundGeolocation') : null;
     const LocalNotifications    = IS_NATIVE ? window.Capacitor.registerPlugin('LocalNotifications')    : null;
+    const CapHttp = IS_NATIVE ? ((window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) || window.Capacitor.registerPlugin('CapacitorHttp')) : null;
 
     // 웹 전용: Service Worker (네이티브에서는 사용 안 함)
     if (!IS_NATIVE && 'serviceWorker' in navigator) {
@@ -266,14 +267,34 @@
     // 네이티브 백그라운드 위치 watcher id
     let bgWatcherId = null;
 
-    // ── 타임아웃 fetch (무한 대기 방지) ──
-    // Promise.race 방식: 내부 fetch가 영영 안 끝나도 ms 후 반드시 에러로 끝남.
-    // CapacitorHttp 호환을 위해 signal/AbortController는 사용하지 않음.
-    function fetchTimeout(url, ms = 12000) {
+    // ── 통합 HTTP GET (네이티브/웹 공용, 무한 대기 방지) ──
+    // 반환: { status, data }  (data: 파싱된 JSON 객체 또는 원본 문자열)
+    // 네이티브에서는 CapacitorHttp 정식 API를 직접 호출 → fetch 패치/CORS/본문읽기 멈춤 문제 회피.
+    function httpGet(url, ms = 12000) {
       const timeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('시간초과(' + (ms/1000) + '초)')), ms)
       );
-      return Promise.race([ fetch(url), timeout ]);
+
+      const run = (async () => {
+        if (IS_NATIVE && CapHttp) {
+          const res = await CapHttp.get({
+            url,
+            headers: { 'Accept': 'application/json' },
+            connectTimeout: ms,
+            readTimeout: ms
+          });
+          let data = res.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+          return { status: res.status, data };
+        } else {
+          const res = await fetch(url);
+          const text = await res.text();
+          let data = text; try { data = JSON.parse(text); } catch(e) {}
+          return { status: res.status, data };
+        }
+      })();
+
+      return Promise.race([ run, timeout ]);
     }
 
     // ── 상태 ──
@@ -385,14 +406,11 @@
         if (!API_KEY) return;
         try {
           const url = `${BUS_API_BASE}/busstationservice/v2/getBusStationListv2?serviceKey=${API_KEY}&format=json&keyword=${encodeURIComponent(q)}`;
-          const res = await fetchTimeout(url);
-          const text = await res.text();
-          let data;
-          try { data = JSON.parse(text); } catch(e) {
-            errors.push('정류장 API: XML 응답 (JSON 미지원 또는 키 오류)');
+          const { status, data } = await httpGet(url);
+          if (typeof data !== 'object' || data === null) {
+            errors.push('정류장 API: 응답 오류 (HTTP ' + status + ')');
             return;
           }
-          if (!res.ok) { errors.push('정류장 API: HTTP ' + res.status); return; }
           let items = data?.response?.msgBody?.busStationList || [];
           if (!Array.isArray(items)) items = [items];
           items.forEach(s => {
@@ -412,11 +430,10 @@
       // 2) 장소 검색 (Nominatim)
       const placeSearch = async () => {
         try {
-          const res = await fetchTimeout(
+          const { status, data } = await httpGet(
             `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=kr&limit=5&accept-language=ko`
           );
-          if (!res.ok) { errors.push('장소검색: HTTP ' + res.status); return; }
-          const data = await res.json();
+          if (!Array.isArray(data)) { errors.push('장소검색: 응답 오류 (HTTP ' + status + ')'); return; }
           data.forEach(p => {
             allResults.push({
               type: 'place',
@@ -482,10 +499,8 @@
 
       try {
         const url = `${BUS_API_BASE}/busarrivalservice/v2/getBusArrivalListv2?serviceKey=${API_KEY}&format=json&stationId=${stationId}`;
-        const res = await fetchTimeout(url);
-        const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); } catch(e) {
+        const { data } = await httpGet(url);
+        if (typeof data !== 'object' || data === null) {
           list.innerHTML = '<div class="search-item">노선 정보를 불러올 수 없습니다</div>';
           // 노선 없어도 정류장 위치로 목적지 설정 가능
           setDestinationFromStop();
@@ -555,20 +570,18 @@
 
       try {
         const url = `${BUS_API_BASE}/busrouteservice/v2/getBusRouteStationListv2?serviceKey=${API_KEY}&format=json&routeId=${routeId}`;
-        const res = await fetchTimeout(url);
-        const text = await res.text();
+        const { status, data } = await httpGet(url);
 
-        // 권한 미승인(Forbidden) 등 처리
-        if (text.trim().startsWith('<') || text.includes('Forbidden') || text.includes('SERVICE')) {
+        // 권한 미승인(Forbidden) 등 처리 (응답이 객체가 아니면 = 에러 문자열)
+        if (typeof data !== 'object' || data === null) {
           listEl.innerHTML = `<div style="font-size:0.82rem;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;line-height:1.6">
             ⚠️ 노선 경로 표시는 <strong>"경기도 버스노선 조회 서비스"</strong> API가 필요합니다.<br>
             <a href="https://www.data.go.kr/data/15080662/openapi.do" target="_blank">data.go.kr에서 추가 활용신청</a> 후 사용 가능합니다.<br>
-            <span style="color:#888">(알림 기능은 지금도 정상 작동합니다)</span>
+            <span style="color:#888">(알림 기능은 지금도 정상 작동합니다 / HTTP ${status})</span>
           </div>`;
           return;
         }
 
-        const data = JSON.parse(text);
         let items = data?.response?.msgBody?.busRouteStationList || [];
         if (!Array.isArray(items)) items = [items];
         if (!items.length) {

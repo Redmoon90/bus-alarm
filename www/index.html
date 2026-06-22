@@ -171,7 +171,10 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v3</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v4</span></h1>
+
+  <!-- 디버그 로그 (문제 진단용) -->
+  <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
 
   <!-- 목적지 설정 -->
   <div class="card">
@@ -250,11 +253,25 @@
   </div>
 
   <script>
+    // ── 디버그 로그 (화면 표시) ──
+    function dbg(msg) {
+      try {
+        const el = document.getElementById('dbg');
+        if (!el) return;
+        const t = new Date().toLocaleTimeString('ko-KR');
+        el.textContent = `[${t}] ${msg}\n` + el.textContent;
+      } catch(e) {}
+    }
+    window.addEventListener('error', e => dbg('❌ 오류: ' + (e.message || e) + ' @' + (e.filename||'') + ':' + (e.lineno||'')));
+    window.addEventListener('unhandledrejection', e => dbg('❌ 처리안된거부: ' + (e.reason && (e.reason.message || e.reason) || e)));
+
     // ── 네이티브 플러그인 브릿지 (Capacitor) ──
     const IS_NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     const BackgroundGeolocation = IS_NATIVE ? window.Capacitor.registerPlugin('BackgroundGeolocation') : null;
     const LocalNotifications    = IS_NATIVE ? window.Capacitor.registerPlugin('LocalNotifications')    : null;
     const CapHttp = IS_NATIVE ? ((window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) || window.Capacitor.registerPlugin('CapacitorHttp')) : null;
+
+    dbg('환경: ' + (IS_NATIVE ? '네이티브앱' : '웹') + ' / CapacitorHttp=' + (!!CapHttp));
 
     // 웹 전용: Service Worker (네이티브에서는 사용 안 함)
     if (!IS_NATIVE && 'serviceWorker' in navigator) {
@@ -276,6 +293,7 @@
       );
 
       const run = (async () => {
+        dbg('요청 시작: ' + url.slice(0, 60) + '...');
         if (IS_NATIVE && CapHttp) {
           const res = await CapHttp.get({
             url,
@@ -283,12 +301,14 @@
             connectTimeout: ms,
             readTimeout: ms
           });
+          dbg('응답 도착(네이티브): HTTP ' + res.status);
           let data = res.data;
           if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
           return { status: res.status, data };
         } else {
           const res = await fetch(url);
           const text = await res.text();
+          dbg('응답 도착(웹): HTTP ' + res.status);
           let data = text; try { data = JSON.parse(text); } catch(e) {}
           return { status: res.status, data };
         }
@@ -394,6 +414,7 @@
     async function searchAll() {
       const q = document.getElementById('search-input').value.trim();
       if (!q) return alert('검색어를 입력해주세요.');
+      dbg('▶ 검색 시작: "' + q + '"');
       const results = document.getElementById('search-results');
       results.innerHTML = '<div class="search-item">검색 중...</div>';
       results.style.display = 'block';
@@ -446,8 +467,9 @@
         } catch(e) { errors.push('장소검색: ' + e.message); }
       };
 
-      // 동시 실행
-      await Promise.all([busSearch(), placeSearch()]);
+      // 동시 실행 (각각 독립 — 하나가 실패해도 전체는 진행)
+      await Promise.allSettled([busSearch(), placeSearch()]);
+      dbg('■ 검색 완료: 결과 ' + allResults.length + '건, 오류 ' + errors.length + '건' + (errors.length ? ' → ' + errors.join(' | ') : ''));
 
       if (!allResults.length) {
         const errMsg = errors.length ? '<br><span style="font-size:0.75rem;color:#999">' + errors.join('<br>') + '</span>' : '';

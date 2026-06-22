@@ -171,7 +171,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v7</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v8</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -519,7 +519,7 @@
       document.getElementById('search-results').style.display = 'none';
 
       document.getElementById('route-card').style.display = 'none';
-      routeStops = []; destIndex = -1; currentIndex = -1;
+      routeStops = []; destIndex = -1; currentIndex = -1; routeDirLabel = '';
 
       if (r.type === 'stop') {
         selectedStop = r;
@@ -569,8 +569,9 @@
           const bus2 = b.predictTime2
             ? `<div class="bus-eta second"><span class="badge second">뒤차</span> 약 ${b.predictTime2}분 · ${b.locationNo2}정거장 전${low2}${seat2}</div>`
             : '';
+          const dir = b.routeDestName ? `<span style="font-size:0.78rem;color:#6b7280;font-weight:400"> · ${b.routeDestName} 방면</span>` : '';
           return `<div class="search-item" onclick="selectBus(${i})">
-            <strong>🚌 ${b.routeName}번</strong>
+            <strong>🚌 ${b.routeName}번</strong>${dir}
             ${bus1}${bus2}
           </div>`;
         }).join('');
@@ -589,10 +590,17 @@
 
     function selectBus(idx) {
       const b = window._busResults[idx];
-      selectedBus = { routeId: b.routeId, routeName: b.routeName };
+      selectedBus = {
+        routeId: b.routeId,
+        routeName: b.routeName,
+        destName: b.routeDestName || '',          // 종점(방면) 이름
+        staOrder: parseInt(b.staOrder) || 0,       // 이 정류장의 노선 내 순번
+        turnSeq:  parseInt(b.turnSeq)  || 0        // 회차(방향 전환) 지점
+      };
+      const dirLabel = b.routeDestName ? ` (${b.routeDestName} 방면)` : '';
       const stopLabel = selectedStop.mobileNo ? `${selectedStop.name} [${selectedStop.mobileNo}]` : selectedStop.name;
-      setDestination(selectedStop.lat, selectedStop.lng, `${stopLabel} — ${b.routeName}번`);
-      document.getElementById('bus-list').innerHTML = `<div class="search-item" style="background:#eff6ff;font-weight:600">✅ ${b.routeName}번 선택됨</div>`;
+      setDestination(selectedStop.lat, selectedStop.lng, `${stopLabel} — ${b.routeName}번${dirLabel}`);
+      document.getElementById('bus-list').innerHTML = `<div class="search-item" style="background:#eff6ff;font-weight:600">✅ ${b.routeName}번${dirLabel} 선택됨</div>`;
       loadRouteStations(b.routeId);
     }
 
@@ -600,6 +608,7 @@
     let routeStops = [];   // [{ stationId, name, lat, lng, seq }]
     let destIndex = -1;    // 목적지 정류장의 인덱스
     let currentIndex = -1; // 현재 위치(가장 가까운 정류장) 인덱스
+    let routeDirLabel = ''; // 방면(종점) 라벨
 
     async function loadRouteStations(routeId) {
       routeStops = []; destIndex = -1; currentIndex = -1;
@@ -631,7 +640,8 @@
           return;
         }
 
-        routeStops = items.map(s => ({
+        // 전체 정류장 (왕복 = 가는 방향 + 오는 방향이 한 줄로 이어짐)
+        const allStops = items.map(s => ({
           stationId: String(s.stationId),
           name: s.stationName || '정류장',
           lat: parseFloat(s.y) || 0,
@@ -639,8 +649,47 @@
           seq: parseInt(s.stationSeq) || 0
         })).sort((a, b) => a.seq - b.seq);
 
-        // 목적지 정류장 인덱스 찾기
-        destIndex = routeStops.findIndex(s => s.stationId === String(selectedStop.stationId));
+        // 회차 지점(방향 전환) 찾기
+        let turnSeq = parseInt(items[0] && items[0].turnSeq) || 0;
+        if (!turnSeq) {
+          const turnItem = items.find(s => s.turnYn === 'Y');
+          turnSeq = turnItem ? (parseInt(turnItem.stationSeq) || 0) : 0;
+        }
+        const maxSeq = allStops.length ? allStops[allStops.length - 1].seq : 0;
+
+        const did = String(selectedStop.stationId);
+
+        // 목적지가 속한 방향(절반)만 추출 (C)
+        routeDirLabel = selectedBus && selectedBus.destName ? `${selectedBus.destName} 방면` : '';
+        if (turnSeq > 0 && turnSeq < maxSeq) {
+          let outbound;
+          const so = selectedBus && selectedBus.staOrder ? selectedBus.staOrder : 0;
+          if (so > 0) {
+            outbound = so <= turnSeq;
+          } else {
+            const occ = allStops.filter(s => s.stationId === did);
+            outbound = occ.length ? (occ[0].seq <= turnSeq) : true;
+          }
+          routeStops = outbound
+            ? allStops.filter(s => s.seq <= turnSeq)
+            : allStops.filter(s => s.seq > turnSeq);
+          dbg('노선 방향 분리: ' + (outbound ? '가는방향' : '오는방향') + ' (' + routeStops.length + '개 / 전체 ' + allStops.length + ')');
+        } else {
+          routeStops = allStops; // 회차 정보 없으면 전체 사용
+        }
+
+        // 목적지 인덱스: 같은 정류장이 여러 번이면 staOrder에 가장 가까운 것
+        const cand = [];
+        routeStops.forEach((s, i) => { if (s.stationId === did) cand.push(i); });
+        if (!cand.length) {
+          destIndex = -1;
+        } else if (cand.length === 1 || !(selectedBus && selectedBus.staOrder)) {
+          destIndex = cand[0];
+        } else {
+          const so = selectedBus.staOrder;
+          destIndex = cand.reduce((best, i) =>
+            Math.abs(routeStops[i].seq - so) < Math.abs(routeStops[best].seq - so) ? i : best, cand[0]);
+        }
 
         renderRoute();
       } catch(e) {
@@ -665,12 +714,15 @@
         </div>`;
       }).join('');
 
-      // 진행 상황 텍스트
+      // 진행 상황 텍스트 (방면 + 남은 정거장)
       const progEl = document.getElementById('route-progress');
+      const parts = [];
+      if (routeDirLabel) parts.push(routeDirLabel);
       if (currentIndex >= 0 && destIndex >= 0) {
         const remain = destIndex - currentIndex;
-        progEl.textContent = remain > 0 ? `· 목적지까지 ${remain}개 정류장` : '· 목적지 도착!';
+        parts.push(remain > 0 ? `목적지까지 ${remain}개 정류장` : '목적지 도착!');
       }
+      progEl.textContent = parts.length ? '· ' + parts.join(' · ') : '';
 
       // 현재 위치로 스크롤
       if (currentIndex >= 0) {

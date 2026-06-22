@@ -7,6 +7,8 @@
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#3b82f6" />
   <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -171,7 +173,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v8</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v9</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -239,6 +241,7 @@
   <!-- 노선도 -->
   <div class="card" id="route-card" style="display:none">
     <div class="card-title">🗺️ 노선 경로 <span id="route-progress" style="font-size:0.78rem;font-weight:400;color:#3b82f6"></span></div>
+    <div id="route-map" style="height:260px;border-radius:12px;overflow:hidden;margin-bottom:12px;display:none;background:#e8eef4;"></div>
     <div class="route-list" id="route-list"></div>
   </div>
 
@@ -253,6 +256,10 @@
   </div>
 
   <script>
+    // ── 저장소 안전 접근 (data: URL 등 저장소 막힌 환경에서도 안 죽음) ──
+    function lsGet(k) { try { return localStorage.getItem(k); } catch(e) { return null; } }
+    function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(e) {} }
+
     // ── 디버그 로그 (화면 표시) ──
     function dbg(msg) {
       try {
@@ -345,7 +352,7 @@
 
     // ── 즐겨찾기 ──
     function loadFavorites() {
-      return JSON.parse(localStorage.getItem('busFavorites') || '[]');
+      return JSON.parse(lsGet('busFavorites') || '[]');
     }
 
     function renderFavorites() {
@@ -378,7 +385,7 @@
       if (!confirm('삭제하시겠습니까?')) return;
       const favs = loadFavorites();
       favs.splice(idx, 1);
-      localStorage.setItem('busFavorites', JSON.stringify(favs));
+      lsSet('busFavorites', JSON.stringify(favs));
       renderFavorites();
     }
 
@@ -388,7 +395,7 @@
       if (!destination) return alert('먼저 목적지를 설정해주세요.');
       const favs = loadFavorites();
       favs.push({ name, lat: destination.lat, lng: destination.lng });
-      localStorage.setItem('busFavorites', JSON.stringify(favs));
+      lsSet('busFavorites', JSON.stringify(favs));
       document.getElementById('fav-name-input').value = '';
       renderFavorites();
       alert('즐겨찾기에 저장되었습니다!');
@@ -414,13 +421,13 @@
 
     // ── API 키 ──
     const BUS_API_BASE = 'https://apis.data.go.kr/6410000';
-    let API_KEY = localStorage.getItem('busApiKey') || '1c802e73082687117fef3e115599a8b9fd25e1a212f6a8014e3db6012a3cd0a2';
+    let API_KEY = lsGet('busApiKey') || '1c802e73082687117fef3e115599a8b9fd25e1a212f6a8014e3db6012a3cd0a2';
 
     function saveApiKey() {
       const key = document.getElementById('api-key-input').value.trim();
       if (!key) return alert('API 키를 입력해주세요.');
       API_KEY = key;
-      localStorage.setItem('busApiKey', key);
+      lsSet('busApiKey', key);
       alert('API 키가 저장되었습니다.');
     }
 
@@ -692,6 +699,7 @@
         }
 
         renderRoute();
+        drawRouteMap();
       } catch(e) {
         listEl.innerHTML = '<div style="font-size:0.85rem;color:#dc2626;padding:8px">노선 로딩 실패: ' + e.message + '</div>';
       }
@@ -743,7 +751,63 @@
       if (best !== currentIndex) {
         currentIndex = best;
         renderRoute();
+        drawRouteMap();
       }
+      updateMapCurrent(lat, lng);
+    }
+
+    // ── 지도(Leaflet) ──
+    let routeMap = null;
+    let mapLayers = [];
+    let curMarker = null;
+
+    function initRouteMap() {
+      if (routeMap || typeof L === 'undefined') return;
+      const el = document.getElementById('route-map');
+      el.style.display = 'block';
+      routeMap = L.map(el, { zoomControl: true, attributionControl: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(routeMap);
+      setTimeout(() => { try { routeMap.invalidateSize(); } catch(e){} }, 200);
+    }
+
+    function drawRouteMap() {
+      if (typeof L === 'undefined') { dbg('지도 라이브러리(L) 미로드'); return; }
+      document.getElementById('route-map').style.display = 'block';
+      initRouteMap();
+      if (!routeMap) return;
+
+      mapLayers.forEach(l => routeMap.removeLayer(l));
+      mapLayers = [];
+
+      const pts = routeStops.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
+      if (!pts.length) return;
+
+      const line = L.polyline(pts, { color: '#3b82f6', weight: 4, opacity: 0.8 }).addTo(routeMap);
+      mapLayers.push(line);
+
+      routeStops.forEach((s, i) => {
+        if (!s.lat || !s.lng) return;
+        let color = '#94a3b8', r = 4;
+        if (i === destIndex) { color = '#22c55e'; r = 8; }
+        else if (currentIndex >= 0 && i < currentIndex) color = '#cbd5e1';
+        const m = L.circleMarker([s.lat, s.lng], {
+          radius: r, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1
+        }).addTo(routeMap);
+        m.bindTooltip(`${i + 1}. ${s.name}${i === destIndex ? ' 🎯' : ''}`, { direction: 'top' });
+        mapLayers.push(m);
+      });
+
+      try { routeMap.fitBounds(line.getBounds(), { padding: [30, 30] }); } catch(e) {}
+      setTimeout(() => { try { routeMap.invalidateSize(); } catch(e){} }, 200);
+    }
+
+    function updateMapCurrent(lat, lng) {
+      if (!routeMap || typeof L === 'undefined') return;
+      if (curMarker) routeMap.removeLayer(curMarker);
+      curMarker = L.circleMarker([lat, lng], {
+        radius: 9, color: '#fff', weight: 3, fillColor: '#3b82f6', fillOpacity: 1
+      }).addTo(routeMap);
+      curMarker.bindTooltip('📍 현재 위치', { direction: 'top' });
     }
 
     // ── 거리 계산 (Haversine) ──

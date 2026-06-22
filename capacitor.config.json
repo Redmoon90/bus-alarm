@@ -1,0 +1,10 @@
+{
+  "appId": "com.busalarm.app",
+  "appName": "버스 하차 알리미",
+  "webDir": "www",
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#3b82f6"
+    }
+  }
+}

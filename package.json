@@ -1,0 +1,15 @@
+{
+  "name": "bus-alarm-native",
+  "version": "1.0.0",
+  "description": "버스 하차 알리미 - 네이티브 앱 (화면 꺼짐 백그라운드 알람)",
+  "private": true,
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/local-notifications": "^6.1.0",
+    "@capacitor-community/background-geolocation": "^1.2.21"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

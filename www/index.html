@@ -173,7 +173,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v9</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v10</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -322,7 +322,7 @@
         if (IS_NATIVE && CapHttp) {
           const res = await CapHttp.get({
             url,
-            headers: { 'Accept': 'application/json' },
+            headers: { 'Accept': 'application/json', 'User-Agent': 'BusAlarmApp/1.0 (ko)' },
             connectTimeout: ms,
             readTimeout: ms
           });
@@ -760,6 +760,7 @@
     let routeMap = null;
     let mapLayers = [];
     let curMarker = null;
+    let lastGps = null;   // 마지막 GPS 위치 {lat,lng}
 
     function initRouteMap() {
       if (routeMap || typeof L === 'undefined') return;
@@ -767,7 +768,43 @@
       el.style.display = 'block';
       routeMap = L.map(el, { zoomControl: true, attributionControl: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(routeMap);
+      addLocateControl(routeMap);   // 확대/축소 아래 "내 위치" 버튼
       setTimeout(() => { try { routeMap.invalidateSize(); } catch(e){} }, 200);
+    }
+
+    // 지도에 "내 위치로" 버튼 추가 (확대/축소 바로 아래)
+    function addLocateControl(map) {
+      const ctrl = L.control({ position: 'topleft' });
+      ctrl.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        const a = L.DomUtil.create('a', '', div);
+        a.href = '#';
+        a.title = '내 위치로';
+        a.innerHTML = '📍';
+        a.style.cssText = 'font-size:18px;text-align:center;line-height:30px;cursor:pointer;';
+        L.DomEvent.on(a, 'click', function(e) { L.DomEvent.stop(e); goToMyLocation(); });
+        return div;
+      };
+      ctrl.addTo(map);
+    }
+
+    function goToMyLocation() {
+      if (!routeMap) return;
+      if (lastGps) {
+        routeMap.setView([lastGps.lat, lastGps.lng], 16);
+        return;
+      }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          p => {
+            lastGps = { lat: p.coords.latitude, lng: p.coords.longitude };
+            updateMapCurrent(lastGps.lat, lastGps.lng);
+            routeMap.setView([lastGps.lat, lastGps.lng], 16);
+          },
+          () => { dbg('현위치 가져오기 실패 (권한/신호 확인)'); },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
     }
 
     function drawRouteMap() {
@@ -802,6 +839,7 @@
     }
 
     function updateMapCurrent(lat, lng) {
+      lastGps = { lat, lng };
       if (!routeMap || typeof L === 'undefined') return;
       if (curMarker) routeMap.removeLayer(curMarker);
       curMarker = L.circleMarker([lat, lng], {

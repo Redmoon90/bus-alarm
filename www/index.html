@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>곧옴</title>
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#3b82f6" />
+  <meta name="theme-color" content="#22c55e" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -13,12 +13,13 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif;
-      background: #f0f4f8;
+      background: linear-gradient(160deg, #dcfce7 0%, #86efac 100%);
+      background-attachment: fixed;
       min-height: 100vh;
       padding: 20px 16px;
       padding-bottom: 100px;
     }
-    h1 { font-size: 1.3rem; color: #1a2e4a; text-align: center; margin-bottom: 20px; }
+    h1 { font-size: 1.3rem; color: #14532d; text-align: center; margin-bottom: 20px; }
     .card {
       background: white;
       border-radius: 16px;
@@ -173,10 +174,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#22c55e">v14</span></h1>
-
-  <!-- 디버그 로그 (문제 진단용) -->
-  <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
+  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#15803d">v15</span></h1>
 
   <!-- 목적지 설정 -->
   <div class="card">
@@ -236,7 +234,6 @@
     <br>
     <button class="btn btn-start" id="start-btn" disabled onclick="startTracking()">알림 시작</button>
     <button class="btn btn-stop" id="stop-btn" onclick="stopTracking()">알림 중지</button>
-    <button class="btn" style="background:#f59e0b;color:#fff;margin-top:8px" onclick="testAlarm()">🔔 알람 테스트 (지금 울려보기)</button>
   </div>
 
   <!-- 노선도 -->
@@ -249,10 +246,10 @@
   <!-- 사용 안내 -->
   <div class="card" style="font-size:0.8rem; color:#666; line-height:1.7">
     <div class="card-title">💡 사용 방법</div>
-    1. 정류장 검색 → 버스 노선 선택<br>
+    1. 정류장 검색 → 버스 노선 선택 (또는 장소 선택)<br>
     2. <strong>"알림 시작"</strong> 버튼 탭<br>
-    3. 버스 타고 이동 (<strong>화면 꺼도 됨</strong> · 다른 앱 사용 가능)<br>
-    4. 목적지 200m 이내 도착 시 <strong>소리 + 진동 알림</strong><br><br>
+    3. 목적지로 이동 (<strong>화면 꺼도 됨</strong> · 다른 앱 사용 가능)<br>
+    4. 목적지 300m·100m 이내 도착 시 <strong>소리 + 진동 알림</strong><br><br>
     ⚠️ 첫 실행 시 위치 권한을 <strong>"항상 허용"</strong>, 알림 권한을 <strong>"허용"</strong> 으로 설정해야 화면이 꺼져도 알림이 옵니다.
   </div>
 
@@ -1067,13 +1064,6 @@
     }
 
     // ── 알람 (소리 + 진동 + 알림) ──
-    // 알람 테스트 (백그라운드 감지와 무관하게 알람 화면/소리만 즉시 확인)
-    function testAlarm() {
-      dbg('🧪 알람 테스트 실행');
-      const destName = (destination && destination.name) || '테스트 목적지';
-      fireAlarmCore('🚨 알람 테스트!', `${destName} — 알람이 이렇게 울립니다`, 10);
-    }
-
     function fireAlarm(stage, dist) {
       const remain = (dist != null) ? Math.round(dist) : stage;
       const title = stage <= 100 ? '🚨 곧 도착! 내릴 준비!' : `🚌 도착 ${stage}m 전`;

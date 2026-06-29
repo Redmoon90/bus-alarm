@@ -173,7 +173,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#22c55e">v13</span></h1>
+  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#22c55e">v14</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -540,7 +540,30 @@
         selectedBus = null;
         document.getElementById('bus-section').style.display = 'none';
         setDestination(r.lat, r.lng, r.name);
+        drawDestinationMap(r.lat, r.lng, r.name);   // 장소도 지도 표시
       }
+    }
+
+    // 장소(노선 없음) 목적지 지도 — 목적지 마커만
+    function drawDestinationMap(lat, lng, name) {
+      const card = document.getElementById('route-card');
+      card.style.display = 'block';
+      document.getElementById('route-progress').textContent = '';
+      document.getElementById('route-list').innerHTML =
+        `<div style="font-size:0.88rem;color:#16a34a;padding:8px"><strong>🎯 ${name}</strong> (목적지)</div>`;
+      if (typeof L === 'undefined') { dbg('지도 라이브러리(L) 미로드'); return; }
+      document.getElementById('route-map').style.display = 'block';
+      initRouteMap();
+      if (!routeMap) return;
+      mapLayers.forEach(l => routeMap.removeLayer(l));
+      mapLayers = [];
+      const m = L.circleMarker([lat, lng], {
+        radius: 9, color: '#fff', weight: 2, fillColor: '#22c55e', fillOpacity: 1
+      }).addTo(routeMap);
+      m.bindTooltip(`🎯 ${name}`, { direction: 'top' });
+      mapLayers.push(m);
+      routeMap.setView([lat, lng], 15);
+      setTimeout(() => { try { routeMap.invalidateSize(); } catch(e){} }, 200);
     }
 
     // ── 버스 노선 로딩 ──
@@ -743,6 +766,7 @@
 
     // 현재 GPS 위치에서 가장 가까운 노선 정류장 인덱스 갱신
     function updateRoutePosition(lat, lng) {
+      updateMapCurrent(lat, lng);   // 장소·노선 둘 다 현재 위치 마커 갱신
       if (!routeStops.length) return;
       let best = -1, bestDist = Infinity;
       routeStops.forEach((s, i) => {
@@ -755,7 +779,6 @@
         renderRoute();
         drawRouteMap();
       }
-      updateMapCurrent(lat, lng);
     }
 
     // ── 지도(Leaflet) ──

@@ -173,7 +173,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v11</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v12</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -231,7 +231,7 @@
     <div class="status-box" id="status-box">
       <div class="status-sub">목적지를 설정한 후 알림을 시작하세요</div>
     </div>
-    <div class="radius-info">목적지 반경 <strong>200m</strong> 진입 시 알림</div>
+    <div class="radius-info">목적지 <strong>300m·100m</strong> 진입 시 알림 (화면 꺼져도 작동)</div>
     <div id="log"></div>
     <br>
     <button class="btn btn-start" id="start-btn" disabled onclick="startTracking()">알림 시작</button>
@@ -291,6 +291,7 @@
     const LocalNotifications    = IS_NATIVE ? getPlugin('LocalNotifications')    : null;
     const CapHttp               = IS_NATIVE ? getPlugin('CapacitorHttp')         : null;
     const FullScreenAlarm       = IS_NATIVE ? getPlugin('FullScreenAlarm')       : null;
+    const BusGeofence           = IS_NATIVE ? getPlugin('BusGeofence')           : null;
 
     try {
       const keys = (window.Capacitor && window.Capacitor.Plugins) ? Object.keys(window.Capacitor.Plugins).join(',') : '(없음)';
@@ -303,8 +304,8 @@
     }
 
     // ── 상수 ──
-    const ALERT_RADIUS = 200; // 미터
-    const ALARM_STAGES = [200, 100, 50, 10]; // 이 거리들에 진입할 때마다 알람
+    const ALERT_RADIUS = 300; // 미터 (가장 바깥 알람 거리)
+    const ALARM_STAGES = [300, 100];          // 이 거리들에 진입할 때마다 알람
     let firedStages = new Set();             // 이미 알람 울린 단계
 
     // 네이티브 백그라운드 위치 watcher id
@@ -886,6 +887,19 @@
       document.getElementById('stop-btn').style.display = 'block';
       setStatus('tracking', '추적 중...', `${destination.name} 방향 이동 중`);
 
+      // 지오펜스 등록 (화면 꺼짐/앱 종료에도 OS가 도착 감지 → 알람)
+      if (IS_NATIVE && BusGeofence) {
+        try {
+          await BusGeofence.register({
+            lat: destination.lat,
+            lng: destination.lng,
+            name: destination.name,
+            radii: ALARM_STAGES
+          });
+          dbg('지오펜스 등록: ' + ALARM_STAGES.join('/') + 'm');
+        } catch(e) { dbg('지오펜스 등록 실패: ' + (e.message||e)); }
+      }
+
       if (IS_NATIVE && BackgroundGeolocation) {
         // ── 네이티브: 백그라운드 위치 추적 (화면 꺼져도 작동) ──
         try { if (LocalNotifications) await LocalNotifications.requestPermissions(); } catch(e) {}
@@ -932,6 +946,9 @@
     }
 
     async function stopTracking() {
+      if (IS_NATIVE && BusGeofence) {
+        try { await BusGeofence.remove(); } catch(e) {}
+      }
       if (IS_NATIVE && bgWatcherId !== null) {
         try { await BackgroundGeolocation.removeWatcher({ id: bgWatcherId }); } catch(e) {}
         bgWatcherId = null;

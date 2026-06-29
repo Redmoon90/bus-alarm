@@ -13,7 +13,7 @@ public class FullScreenAlarm extends Plugin {
 
     @PluginMethod
     public void trigger(PluginCall call) {
-        String title = call.getString("title", "🚌 하차 알림!");
+        String title = call.getString("title", "🚌 도착 알림!");
         String body  = call.getString("body", "곧 도착합니다");
         AlarmNotifier.fire(getContext(), title, body);
         call.resolve();

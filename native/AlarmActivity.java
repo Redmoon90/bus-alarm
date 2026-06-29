@@ -1,8 +1,10 @@
 package com.busalarm.app;
 
+import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.graphics.Color;
-import android.media.AudioManager;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -13,13 +15,14 @@ import android.os.Vibrator;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.animation.LinearInterpolator;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
  * 화면 꺼짐/잠금 상태에서도 화면을 꽉 채우는 알람 화면.
- * 빨간 배경 + 큰 글씨 + 알람벨 반복 + 진동 반복 + "알람 끄기" 버튼.
+ * 그라데이션 배경 + 큰 버스 아이콘(펄스) + 둥근 끄기 버튼 + 알람벨/진동 반복.
  */
 public class AlarmActivity extends Activity {
     private Ringtone ringtone;
@@ -29,7 +32,6 @@ public class AlarmActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 잠금화면 위에 표시 + 화면 켜기
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             setTurnScreenOn(true);
@@ -42,49 +44,94 @@ public class AlarmActivity extends Activity {
 
         String title = getIntent().getStringExtra("title");
         String body  = getIntent().getStringExtra("body");
-        if (title == null) title = "🛌 하차 알람!";
+        if (title == null) title = "🚌 도착!";
         if (body  == null) body  = "곧 도착합니다";
 
         float d = getResources().getDisplayMetrics().density;
-        int pad = (int)(24 * d);
+        int pad = (int)(28 * d);
 
+        // 그라데이션 배경
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setBackgroundColor(Color.parseColor("#dc2626"));
+        GradientDrawable bg = new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{ Color.parseColor("#ef4444"), Color.parseColor("#b91c1c") });
+        root.setBackground(bg);
         root.setPadding(pad, pad, pad, pad);
 
+        // 큰 버스 아이콘 (반투명 원형 배경)
+        TextView icon = new TextView(this);
+        icon.setText("🚌");
+        icon.setTextSize(70);
+        icon.setGravity(Gravity.CENTER);
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setShape(GradientDrawable.OVAL);
+        cbg.setColor(Color.parseColor("#33FFFFFF"));
+        icon.setBackground(cbg);
+        int circle = (int)(150 * d);
+        icon.setLayoutParams(new LinearLayout.LayoutParams(circle, circle));
+
+        // 제목
         TextView tv = new TextView(this);
         tv.setText(title);
         tv.setTextColor(Color.WHITE);
-        tv.setTextSize(34);
+        tv.setTextSize(32);
         tv.setGravity(Gravity.CENTER);
+        tv.setTypeface(tv.getTypeface(), Typeface.BOLD);
+        LinearLayout.LayoutParams tvlp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tvlp.topMargin = (int)(28 * d);
+        tv.setLayoutParams(tvlp);
 
+        // 본문
         TextView bv = new TextView(this);
         bv.setText(body);
-        bv.setTextColor(Color.WHITE);
-        bv.setTextSize(20);
+        bv.setTextColor(Color.parseColor("#FFE4E6"));
+        bv.setTextSize(18);
         bv.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams bvlp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        bvlp.topMargin = pad;
+        bvlp.topMargin = (int)(12 * d);
         bv.setLayoutParams(bvlp);
 
+        // 둥근 흰색 끄기 버튼
         Button stop = new Button(this);
         stop.setText("알람 끄기");
-        stop.setTextSize(22);
+        stop.setTextSize(20);
+        stop.setAllCaps(false);
+        stop.setTextColor(Color.parseColor("#b91c1c"));
+        stop.setTypeface(stop.getTypeface(), Typeface.BOLD);
+        GradientDrawable btnBg = new GradientDrawable();
+        btnBg.setColor(Color.WHITE);
+        btnBg.setCornerRadius(50 * d);
+        stop.setBackground(btnBg);
+        int bw = (int)(44 * d), bh = (int)(16 * d);
+        stop.setPadding(bw, bh, bw, bh);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = pad * 2;
+        slp.topMargin = (int)(52 * d);
         stop.setLayoutParams(slp);
         stop.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { stopAlarm(); finish(); }
         });
 
+        root.addView(icon);
         root.addView(tv);
         root.addView(bv);
         root.addView(stop);
         setContentView(root);
+
+        // 아이콘 펄스 애니메이션
+        try {
+            ObjectAnimator sx = ObjectAnimator.ofFloat(icon, "scaleX", 1f, 1.15f);
+            ObjectAnimator sy = ObjectAnimator.ofFloat(icon, "scaleY", 1f, 1.15f);
+            sx.setRepeatCount(ObjectAnimator.INFINITE); sx.setRepeatMode(ObjectAnimator.REVERSE);
+            sy.setRepeatCount(ObjectAnimator.INFINITE); sy.setRepeatMode(ObjectAnimator.REVERSE);
+            sx.setDuration(650); sy.setDuration(650);
+            sx.setInterpolator(new LinearInterpolator());
+            sx.start(); sy.start();
+        } catch (Exception e) {}
 
         startAlarm();
     }

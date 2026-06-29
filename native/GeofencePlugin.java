@@ -65,6 +65,7 @@ public class GeofencePlugin extends Plugin {
                 .setRequestId("dest_" + Math.round(r))
                 .setCircularRegion(lat, lng, r)
                 .setExpirationDuration(Geofence.NEVER_EXPIRE)
+                .setNotificationResponsiveness(0)   // 가능한 한 즉시 발동
                 .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER)
                 .build());
         }

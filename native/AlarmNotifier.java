@@ -17,7 +17,7 @@ public class AlarmNotifier {
     public static final String CHANNEL_ID = "bus-fullscreen-alarm";
 
     public static void fire(Context ctx, String title, String body) {
-        if (title == null) title = "🚌 하차 알림!";
+        if (title == null) title = "🚌 도착 알림!";
         if (body == null) body = "곧 도착합니다";
 
         NotificationManager nm =

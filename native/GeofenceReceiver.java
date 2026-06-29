@@ -36,7 +36,7 @@ public class GeofenceReceiver extends BroadcastReceiver {
         SharedPreferences sp = context.getSharedPreferences("bus_alarm_prefs", Context.MODE_PRIVATE);
         String name = sp.getString("dest_name", "목적지");
 
-        String title = (minR <= 100) ? "🚨 곧 도착! 내릴 준비!" : "🚌 하차 " + minR + "m 전";
+        String title = (minR <= 100) ? "🚨 곧 도착! 내릴 준비!" : "🚌 도착 " + minR + "m 전";
         String body = name + ((minR != Integer.MAX_VALUE) ? " — 약 " + minR + "m 남음" : " 근처 도착");
 
         AlarmNotifier.fire(context, title, body);

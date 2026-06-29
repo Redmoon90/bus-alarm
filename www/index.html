@@ -173,7 +173,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v10</span></h1>
+  <h1>🚌 버스 하차 알리미 <span style="font-size:0.8rem;color:#22c55e">v11</span></h1>
 
   <!-- 디버그 로그 (문제 진단용) -->
   <div id="dbg" style="max-width:480px;margin:0 auto 12px;background:#111827;color:#a7f3d0;font-size:0.72rem;line-height:1.5;border-radius:10px;padding:10px 12px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;">[디버그] 준비됨. 검색하면 여기에 진행 상황이 표시됩니다.</div>
@@ -236,6 +236,7 @@
     <br>
     <button class="btn btn-start" id="start-btn" disabled onclick="startTracking()">알림 시작</button>
     <button class="btn btn-stop" id="stop-btn" onclick="stopTracking()">알림 중지</button>
+    <button class="btn" style="background:#f59e0b;color:#fff;margin-top:8px" onclick="testAlarm()">🔔 알람 테스트 (지금 울려보기)</button>
   </div>
 
   <!-- 노선도 -->
@@ -995,11 +996,24 @@
 
     // ── 알람 (소리 + 진동 + 알림) ──
     // stage: 200/100/50/10 (m), dist: 현재 실제 거리(m)
+    // 알람 테스트 (백그라운드 감지와 무관하게 알람 화면/소리만 즉시 확인)
+    function testAlarm() {
+      dbg('🧪 알람 테스트 실행');
+      const destName = (destination && destination.name) || '테스트 목적지';
+      fireAlarmCore('🚨 알람 테스트!', `${destName} — 알람이 이렇게 울립니다`, 10);
+    }
+
     function fireAlarm(stage, dist) {
       const remain = (dist != null) ? Math.round(dist) : stage;
       const title = stage <= 10 ? '🚨 곧 도착! 내릴 준비!' : `🚌 하차 ${stage}m 전`;
-      const body = `${destination.name} — ${remain}m 남음`;
+      const destName = (destination && destination.name) || '목적지';
+      const body = `${destName} — ${remain}m 남음`;
       dbg('🔔 알람 발동: ' + stage + 'm (실제 ' + remain + 'm)');
+      fireAlarmCore(title, body, stage);
+    }
+
+    // 실제 알람 동작 (전체화면 + 알림 + 소리 + 진동)
+    function fireAlarmCore(title, body, stage) {
 
       // 진동 (가능하면 — 포그라운드에서 즉시)
       try { if (navigator.vibrate) navigator.vibrate([600, 250, 600, 250, 600]); } catch(e) {}

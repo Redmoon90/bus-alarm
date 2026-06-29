@@ -7,46 +7,47 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 소스 체크아웃
-        uses: actions/checkout@v4
-      - name: Node.js 설치
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Java(JDK 17) 설치
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Android SDK 설치
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
       - name: 의존성 설치
         run: npm install
       - name: Android 플랫폼 추가
         run: npx cap add android
-      - name: 백그라운드 위치/알림 권한 주입
+      - name: 권한 + 액티비티/수신기 주입
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           PERMS='    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />'
           sed -i "0,/<application/s##${PERMS}\n    <application#" "$MANIFEST"
-          ACTIVITY='        <activity android:name=".AlarmActivity" android:exported="false" android:launchMode="singleInstance" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />'
+          ACTIVITY='        <activity android:name=".AlarmActivity" android:exported="false" android:launchMode="singleInstance" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />\n        <receiver android:name=".GeofenceReceiver" android:exported="false" />'
           sed -i "s#</application>#${ACTIVITY}\n    </application>#" "$MANIFEST"
-      - name: 네이티브 소스 주입 (전체화면 알람)
+      - name: 네이티브 소스 주입
         run: |
           DEST=android/app/src/main/java/com/busalarm/app
           mkdir -p "$DEST"
-          cp native/AlarmActivity.java "$DEST/AlarmActivity.java"
-          cp native/FullScreenAlarm.java "$DEST/FullScreenAlarm.java"
-          cp native/MainActivity.java "$DEST/MainActivity.java"
+          cp native/AlarmActivity.java    "$DEST/AlarmActivity.java"
+          cp native/AlarmNotifier.java    "$DEST/AlarmNotifier.java"
+          cp native/FullScreenAlarm.java  "$DEST/FullScreenAlarm.java"
+          cp native/GeofencePlugin.java   "$DEST/GeofencePlugin.java"
+          cp native/GeofenceReceiver.java "$DEST/GeofenceReceiver.java"
+          cp native/MainActivity.java     "$DEST/MainActivity.java"
+      - name: play-services-location 의존성 추가
+        run: |
+          sed -i "s#dependencies {#dependencies {\n    implementation 'com.google.android.gms:play-services-location:21.0.1'#" android/app/build.gradle
       - name: 웹 자산 동기화
         run: npx cap sync android
-      - name: APK 빌드 (debug)
+      - name: APK 빌드
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-      - name: APK 업로드
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: 버스알리미-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk

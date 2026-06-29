@@ -1,6 +1,6 @@
 {
   "appId": "com.busalarm.app",
-  "appName": "버스 하차 알리미",
+  "appName": "곧옴",
   "webDir": "www",
   "plugins": {
     "CapacitorHttp": {

@@ -1,53 +1,92 @@
 name: Build Android APK
+
+# 코드를 올리거나(push), 수동 실행(Run workflow) 시 자동으로 APK를 빌드합니다.
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: 소스 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 설치
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: actions/setup-java@v4
+
+      - name: Java(JDK 17) 설치
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+
+      - name: Android SDK 설치
+        uses: android-actions/setup-android@v3
+
       - name: 의존성 설치
         run: npm install
+
       - name: Android 플랫폼 추가
         run: npx cap add android
-      - name: 권한 + 액티비티/수신기 주입
+
+      - name: 백그라운드 위치/알림 권한 주입
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           PERMS='    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />'
           sed -i "0,/<application/s##${PERMS}\n    <application#" "$MANIFEST"
+          # 전체화면 알람 액티비티 + 지오펜스 수신기 등록
           ACTIVITY='        <activity android:name=".AlarmActivity" android:exported="false" android:launchMode="singleInstance" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />\n        <receiver android:name=".GeofenceReceiver" android:exported="false" />'
           sed -i "s#</application>#${ACTIVITY}\n    </application>#" "$MANIFEST"
-      - name: 네이티브 소스 주입
+          echo "----- AndroidManifest.xml -----"
+          cat "$MANIFEST"
+
+      - name: 네이티브 소스 주입 (전체화면 알람 + 지오펜스)
         run: |
           DEST=android/app/src/main/java/com/busalarm/app
           mkdir -p "$DEST"
-          cp native/AlarmActivity.java    "$DEST/AlarmActivity.java"
-          cp native/AlarmNotifier.java    "$DEST/AlarmNotifier.java"
-          cp native/FullScreenAlarm.java  "$DEST/FullScreenAlarm.java"
-          cp native/GeofencePlugin.java   "$DEST/GeofencePlugin.java"
+          cp native/AlarmActivity.java   "$DEST/AlarmActivity.java"
+          cp native/AlarmNotifier.java   "$DEST/AlarmNotifier.java"
+          cp native/FullScreenAlarm.java "$DEST/FullScreenAlarm.java"
+          cp native/GeofencePlugin.java  "$DEST/GeofencePlugin.java"
           cp native/GeofenceReceiver.java "$DEST/GeofenceReceiver.java"
-          cp native/MainActivity.java     "$DEST/MainActivity.java"
-      - name: play-services-location 의존성 추가
+          cp native/MainActivity.java    "$DEST/MainActivity.java"
+          echo "----- 주입된 파일 -----"
+          ls -l "$DEST"
+
+      - name: play-services-location 의존성 추가 (지오펜스)
         run: |
-          sed -i "s#dependencies {#dependencies {\n    implementation 'com.google.android.gms:play-services-location:21.0.1'#" android/app/build.gradle
+          GRADLE=android/app/build.gradle
+          sed -i "s#dependencies {#dependencies {\n    implementation 'com.google.android.gms:play-services-location:21.0.1'#" "$GRADLE"
+          echo "----- app/build.gradle dependencies -----"
+          grep -n "play-services-location" "$GRADLE" || true
+
+      - name: 앱 아이콘 교체 (연한 초록 배경 + 버스)
+        run: |
+          RES=android/app/src/main/res
+          mkdir -p "$RES/drawable" "$RES/drawable-v24" "$RES/mipmap-anydpi-v26"
+          cp native/ic_launcher_background.xml "$RES/drawable/ic_launcher_background.xml"
+          cp native/ic_launcher_foreground.xml "$RES/drawable/ic_launcher_foreground.xml"
+          cp native/ic_launcher_foreground.xml "$RES/drawable-v24/ic_launcher_foreground.xml"
+          cp native/ic_launcher.xml "$RES/mipmap-anydpi-v26/ic_launcher.xml"
+          cp native/ic_launcher.xml "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+          echo "----- 아이콘 교체 완료 -----"
+          ls -l "$RES/drawable" "$RES/mipmap-anydpi-v26"
+
       - name: 웹 자산 동기화
         run: npx cap sync android
-      - name: APK 빌드
+
+      - name: APK 빌드 (debug)
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
+
+      - name: APK 업로드
+        uses: actions/upload-artifact@v4
         with:
           name: 버스알리미-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk

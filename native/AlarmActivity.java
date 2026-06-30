@@ -2,9 +2,12 @@ package com.busalarm.app;
 
 import android.animation.ObjectAnimator;
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -137,10 +140,24 @@ public class AlarmActivity extends Activity {
     }
 
     private void startAlarm() {
+        // 알람 스트림 볼륨을 최대로 (진동/무음 모드여도 알람은 울림)
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            int max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM);
+            am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0);
+        } catch (Exception e) {}
+
         try {
             Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
             if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
             ringtone = RingtoneManager.getRingtone(getApplicationContext(), uri);
+            // 알람 용도(STREAM_ALARM)로 재생 → 진동/무음 모드에서도 소리남
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                ringtone.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 ringtone.setLooping(true);
             }

@@ -137,6 +137,13 @@
       font-size: 0.78rem; color: #888; text-align: center; margin-top: 4px;
     }
 
+    /* 방면(방향) 버튼 */
+    .dir-btn {
+      flex: 1; padding: 10px 8px; border: 1.5px solid #dde3ea; background: #fff;
+      border-radius: 10px; font-size: 0.85rem; font-weight: 600; color: #555; cursor: pointer;
+    }
+    .dir-btn.active { background: #22c55e; border-color: #22c55e; color: #fff; }
+
     /* 노선도 */
     .route-list { max-height: 360px; overflow-y: auto; }
     .route-stop {
@@ -174,7 +181,7 @@
   </style>
 </head>
 <body>
-  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#15803d">v16</span></h1>
+  <h1>🚌 곧옴 <span style="font-size:0.8rem;color:#15803d">v17</span></h1>
 
   <!-- 전체화면 알림 권한 안내 (안드로이드 14+) -->
   <div id="fsi-warning" style="display:none;max-width:480px;margin:0 auto 14px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:14px;padding:14px 16px;">
@@ -249,6 +256,7 @@
   <!-- 노선도 -->
   <div class="card" id="route-card" style="display:none">
     <div class="card-title">🗺️ 노선 경로 <span id="route-progress" style="font-size:0.78rem;font-weight:400;color:#3b82f6"></span></div>
+    <div id="route-dirs" style="display:none;gap:8px;margin-bottom:12px"></div>
     <div id="route-map" style="height:260px;border-radius:12px;overflow:hidden;margin-bottom:12px;display:none;background:#e8eef4;"></div>
     <div class="route-list" id="route-list"></div>
   </div>
@@ -371,23 +379,44 @@
         list.innerHTML = '<div style="font-size:0.8rem;color:#bbb;text-align:center;padding:8px">저장된 즐겨찾기가 없습니다</div>';
         return;
       }
-      list.innerHTML = favs.map((f, i) => `
-        <div class="fav-item" onclick="selectFavorite(${i})" id="fav-${i}">
+      list.innerHTML = favs.map((f, i) => {
+        const icon = (f.type === 'stop') ? '🚏' : '📍';
+        const sub = (f.type === 'stop')
+          ? `${f.routeName}번${f.destName ? ' · ' + f.destName + ' 방면' : ''}`
+          : `${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}`;
+        return `<div class="fav-item" onclick="selectFavorite(${i})" id="fav-${i}">
           <div>
-            <div class="fav-name">${f.name}</div>
-            <div class="fav-dist">${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}</div>
+            <div class="fav-name">${icon} ${f.name}</div>
+            <div class="fav-dist">${sub}</div>
           </div>
           <button class="fav-del" onclick="event.stopPropagation(); deleteFavorite(${i})">✕</button>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     }
 
     function selectFavorite(idx) {
       const favs = loadFavorites();
       const f = favs[idx];
-      setDestination(f.lat, f.lng, f.name);
       document.querySelectorAll('.fav-item').forEach(el => el.classList.remove('selected'));
-      document.getElementById('fav-' + idx).classList.add('selected');
+      const cur = document.getElementById('fav-' + idx); if (cur) cur.classList.add('selected');
+      document.getElementById('search-results').style.display = 'none';
+      document.getElementById('bus-section').style.display = 'none';
+      document.getElementById('route-card').style.display = 'none';
+      routeStops = []; destIndex = -1; currentIndex = -1; routeDirLabel = '';
+
+      if (f.type === 'stop' && f.routeId) {
+        // 정류장+버스 즐겨찾기 → 노선/지도 복원
+        selectedStop = { stationId: f.stationId, name: f.stopName || f.name, mobileNo: f.mobileNo || '', lat: f.lat, lng: f.lng };
+        selectedBus = { routeId: f.routeId, routeName: f.routeName, destName: f.destName || '', staOrder: f.staOrder || 0, turnSeq: f.turnSeq || 0 };
+        const dirLabel = f.destName ? ` (${f.destName} 방면)` : '';
+        setDestination(f.lat, f.lng, `${f.name}${dirLabel}`);
+        loadRouteStations(f.routeId);
+      } else {
+        // 장소 즐겨찾기 → 지도만
+        selectedStop = null; selectedBus = null;
+        setDestination(f.lat, f.lng, f.name);
+        drawDestinationMap(f.lat, f.lng, f.name);
+      }
     }
 
     function deleteFavorite(idx) {
@@ -403,7 +432,19 @@
       if (!name) return alert('이름을 입력해주세요.');
       if (!destination) return alert('먼저 목적지를 설정해주세요.');
       const favs = loadFavorites();
-      favs.push({ name, lat: destination.lat, lng: destination.lng });
+      let fav;
+      if (selectedStop && selectedBus) {
+        fav = {
+          name, type: 'stop',
+          lat: destination.lat, lng: destination.lng,
+          stationId: selectedStop.stationId, mobileNo: selectedStop.mobileNo || '', stopName: selectedStop.name,
+          routeId: selectedBus.routeId, routeName: selectedBus.routeName,
+          destName: selectedBus.destName || '', staOrder: selectedBus.staOrder || 0, turnSeq: selectedBus.turnSeq || 0
+        };
+      } else {
+        fav = { name, type: 'place', lat: destination.lat, lng: destination.lng };
+      }
+      favs.push(fav);
       lsSet('busFavorites', JSON.stringify(favs));
       document.getElementById('fav-name-input').value = '';
       renderFavorites();
@@ -553,6 +594,9 @@
 
     // 장소(노선 없음) 목적지 지도 — 목적지 마커만
     function drawDestinationMap(lat, lng, name) {
+      window._dirNameA = ''; window._dirNameB = '';
+      const dirs = document.getElementById('route-dirs');
+      if (dirs) { dirs.style.display = 'none'; dirs.innerHTML = ''; }
       const card = document.getElementById('route-card');
       card.style.display = 'block';
       document.getElementById('route-progress').textContent = '';
@@ -696,45 +740,84 @@
         }
         const maxSeq = allStops.length ? allStops[allStops.length - 1].seq : 0;
 
-        const did = String(selectedStop.stationId);
-
-        // 목적지가 속한 방향(절반)만 추출 (C)
-        routeDirLabel = selectedBus && selectedBus.destName ? `${selectedBus.destName} 방면` : '';
+        // 두 방면(방향)의 종점 이름 계산
+        let nameA = '', nameB = '';
         if (turnSeq > 0 && turnSeq < maxSeq) {
-          let outbound;
-          const so = selectedBus && selectedBus.staOrder ? selectedBus.staOrder : 0;
-          if (so > 0) {
-            outbound = so <= turnSeq;
-          } else {
-            const occ = allStops.filter(s => s.stationId === did);
-            outbound = occ.length ? (occ[0].seq <= turnSeq) : true;
-          }
-          routeStops = outbound
-            ? allStops.filter(s => s.seq <= turnSeq)
-            : allStops.filter(s => s.seq > turnSeq);
-          dbg('노선 방향 분리: ' + (outbound ? '가는방향' : '오는방향') + ' (' + routeStops.length + '개 / 전체 ' + allStops.length + ')');
-        } else {
-          routeStops = allStops; // 회차 정보 없으면 전체 사용
+          const aStops = allStops.filter(s => s.seq <= turnSeq);
+          const bStops = allStops.filter(s => s.seq > turnSeq);
+          nameA = aStops.length ? aStops[aStops.length - 1].name.replace(/\(.*?\)/g, '').trim() : '가는방향';
+          nameB = bStops.length ? bStops[bStops.length - 1].name.replace(/\(.*?\)/g, '').trim() : '오는방향';
+        }
+        window._allStops = allStops;
+        window._turnSeq = turnSeq;
+        window._dirNameA = nameA;
+        window._dirNameB = nameB;
+
+        // 기본 방향 자동 판단 (내 정류장의 staOrder 기준)
+        const so = selectedBus && selectedBus.staOrder ? selectedBus.staOrder : 0;
+        let defaultOutbound = true;
+        if (turnSeq > 0 && so > 0) defaultOutbound = so <= turnSeq;
+        else if (selectedStop) {
+          const occ = allStops.filter(s => s.stationId === String(selectedStop.stationId));
+          if (occ.length) defaultOutbound = occ[0].seq <= turnSeq;
         }
 
-        // 목적지 인덱스: 같은 정류장이 여러 번이면 staOrder에 가장 가까운 것
-        const cand = [];
-        routeStops.forEach((s, i) => { if (s.stationId === did) cand.push(i); });
-        if (!cand.length) {
-          destIndex = -1;
-        } else if (cand.length === 1 || !(selectedBus && selectedBus.staOrder)) {
-          destIndex = cand[0];
-        } else {
-          const so = selectedBus.staOrder;
-          destIndex = cand.reduce((best, i) =>
-            Math.abs(routeStops[i].seq - so) < Math.abs(routeStops[best].seq - so) ? i : best, cand[0]);
-        }
-
-        renderRoute();
-        drawRouteMap();
+        setRouteDirection(defaultOutbound);
       } catch(e) {
         listEl.innerHTML = '<div style="font-size:0.85rem;color:#dc2626;padding:8px">노선 로딩 실패: ' + e.message + '</div>';
       }
+    }
+
+    // 방면(방향) 선택 — 두 방향 중 하나로 노선 경로 구성
+    function setRouteDirection(outbound) {
+      const allStops = window._allStops || [];
+      const turnSeq = window._turnSeq || 0;
+      const maxSeq = allStops.length ? allStops[allStops.length - 1].seq : 0;
+
+      if (turnSeq > 0 && turnSeq < maxSeq) {
+        routeStops = outbound ? allStops.filter(s => s.seq <= turnSeq)
+                              : allStops.filter(s => s.seq > turnSeq);
+        routeDirLabel = (outbound ? window._dirNameA : window._dirNameB) || '';
+      } else {
+        routeStops = allStops;
+        routeDirLabel = '';
+      }
+      window._outbound = outbound;
+
+      // 목적지 인덱스: 같은 정류장 id 우선, 없으면 좌표로 가장 가까운 정류장
+      destIndex = -1;
+      const did = selectedStop ? String(selectedStop.stationId) : '';
+      const cand = [];
+      routeStops.forEach((s, i) => { if (s.stationId === did) cand.push(i); });
+      if (cand.length) {
+        const so = selectedBus && selectedBus.staOrder ? selectedBus.staOrder : 0;
+        destIndex = so ? cand.reduce((b, i) => Math.abs(routeStops[i].seq - so) < Math.abs(routeStops[b].seq - so) ? i : b, cand[0]) : cand[0];
+      } else if (selectedStop) {
+        let best = -1, bd = Infinity;
+        routeStops.forEach((s, i) => {
+          if (!s.lat || !s.lng) return;
+          const d = calcDistance(selectedStop.lat, selectedStop.lng, s.lat, s.lng);
+          if (d < bd) { bd = d; best = i; }
+        });
+        destIndex = best;
+      }
+      currentIndex = -1;
+
+      renderDirButtons();
+      renderRoute();
+      drawRouteMap();
+    }
+
+    // 두 방면 버튼 표시
+    function renderDirButtons() {
+      const el = document.getElementById('route-dirs');
+      if (!el) return;
+      if (!window._dirNameA || !window._dirNameB) { el.innerHTML = ''; el.style.display = 'none'; return; }
+      el.style.display = 'flex';
+      const ob = window._outbound;
+      el.innerHTML =
+        `<button class="dir-btn ${ob ? 'active' : ''}" onclick="setRouteDirection(true)">${window._dirNameA} 방면</button>` +
+        `<button class="dir-btn ${!ob ? 'active' : ''}" onclick="setRouteDirection(false)">${window._dirNameB} 방면</button>`;
     }
 
     function renderRoute() {
@@ -940,7 +1023,7 @@
               stale: false,
               backgroundTitle: '곧옴',
               backgroundMessage: '목적지까지 위치를 확인하는 중입니다',
-              distanceFilter: 20
+              distanceFilter: 8
             },
             (location, error) => {
               if (error) {
